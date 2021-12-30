@@ -7,16 +7,20 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.appcompat.widget.SearchView
 import androidx.fragment.app.Fragment
+import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.retrofitnavigation.R
 import com.example.retrofitnavigation.adapter.UserAdapter
 import com.example.retrofitnavigation.databinding.FragmentListBinding
 import com.example.retrofitnavigation.model.GithubUser
+import com.example.retrofitnavigation.model.PagingData
 import com.example.retrofitnavigation.retrofit.GithubService
 import com.google.android.material.snackbar.Snackbar
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+
 
 class ListFragment : Fragment() {
     private var _binding: FragmentListBinding? = null
@@ -24,7 +28,14 @@ class ListFragment : Fragment() {
         "View was destroyed"
     }
 
-    private val adapter = UserAdapter()
+    private val adapter = UserAdapter { user ->
+        findNavController().navigate(
+            ListFragmentDirections.toDetails(user.login)
+        )
+    }
+
+    private var isLoading = false
+    private var currentPage = 0
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -49,7 +60,6 @@ class ListFragment : Fragment() {
                 .let { it.actionView as SearchView }
                 .setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                     override fun onQueryTextSubmit(query: String): Boolean {
-                        handleSearch(query)
                         return true
                     }
 
@@ -60,13 +70,33 @@ class ListFragment : Fragment() {
 
             layoutSwiperefresh.setOnRefreshListener {
                 adapter.submitList(emptyList())
+                currentPage = 0
                 loadUsers {
                     layoutSwiperefresh.isRefreshing = false
                 }
             }
 
+            val linearLayoutManager = LinearLayoutManager(
+                view.context, LinearLayoutManager.VERTICAL, false
+            )
+
             recyclerView.adapter = adapter
+            recyclerView.layoutManager = linearLayoutManager
             recyclerView.addHorizontalSpaceDecoration(RECYCLER_ITEM_SPACE)
+            recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+
+                    val totalItemCount = linearLayoutManager.itemCount
+                    val lastVisibleItem = linearLayoutManager.findLastVisibleItemPosition()
+
+                    if (!isLoading && dy != 0 && totalItemCount <= (lastVisibleItem + COUNT_TO_LOAD)) {
+                        recyclerView.post {
+                            loadUsers()
+                        }
+                    }
+                }
+            })
         }
     }
 
@@ -75,33 +105,57 @@ class ListFragment : Fragment() {
         _binding = null
     }
 
-    private fun loadUsers(onFinishLoading: () -> Unit = {}) {
-        GithubService.githubApi.getUsers(0, 50)
+    private fun loadUsers(onLoadingFinished: () -> Unit = {}) {
+        if (isLoading) return
+
+        isLoading = true
+
+        val loadingFinishedCallback = {
+            isLoading = false
+            onLoadingFinished()
+        }
+
+        val since = currentPage * PAGE_SIZE
+        GithubService.githubApi.getUsers(since, PAGE_SIZE)
             .enqueue(object : Callback<List<GithubUser>> {
                 override fun onResponse(
                     call: Call<List<GithubUser>>,
                     response: Response<List<GithubUser>>
                 ) {
                     if (response.isSuccessful) {
-                        adapter.submitList(response.body())
+                        val newList = adapter.currentList
+                            .dropLastWhile { it == PagingData.Loading }
+                            .plus(response.body()?.map { PagingData.Content(it) }.orEmpty())
+                            .plus(PagingData.Loading)
+                        adapter.submitList(newList)
+                        currentPage++
+                    } else {
+                        handleErrors(response.errorBody()?.string() ?: GENERAL_ERROR_MESSAGE)
                     }
-                    onFinishLoading()
+
+                    loadingFinishedCallback()
                 }
 
                 override fun onFailure(call: Call<List<GithubUser>>, t: Throwable) {
-                    onFinishLoading()
-                    Snackbar.make(binding.root, t.message ?: "", Snackbar.LENGTH_SHORT)
-                        .show()
+                    handleErrors(t.message ?: GENERAL_ERROR_MESSAGE)
+                    loadingFinishedCallback()
                 }
             })
     }
 
-    private fun handleSearch(query: String) {
-
+    private fun handleErrors(errorMessage: String) {
+        Snackbar.make(binding.root, errorMessage, Snackbar.LENGTH_SHORT)
+            .setAction(android.R.string.ok) {}
+            .show()
     }
 
     companion object {
         private const val RECYCLER_ITEM_SPACE = 50
+
+        private const val PAGE_SIZE = 50
+        private const val COUNT_TO_LOAD = 15
+
+        private const val GENERAL_ERROR_MESSAGE = "Something went wrong"
     }
 }
 
