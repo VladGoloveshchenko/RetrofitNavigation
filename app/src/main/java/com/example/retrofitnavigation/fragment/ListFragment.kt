@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.retrofitnavigation.R
 import com.example.retrofitnavigation.adapter.UserAdapter
+import com.example.retrofitnavigation.addPaginationScrollListener
 import com.example.retrofitnavigation.databinding.FragmentListBinding
 import com.example.retrofitnavigation.model.GithubUser
 import com.example.retrofitnavigation.model.PagingData
@@ -20,7 +21,6 @@ import com.google.android.material.snackbar.Snackbar
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
-
 
 class ListFragment : Fragment() {
     private var _binding: FragmentListBinding? = null
@@ -83,20 +83,9 @@ class ListFragment : Fragment() {
             recyclerView.adapter = adapter
             recyclerView.layoutManager = linearLayoutManager
             recyclerView.addHorizontalSpaceDecoration(RECYCLER_ITEM_SPACE)
-            recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                    super.onScrolled(recyclerView, dx, dy)
-
-                    val totalItemCount = linearLayoutManager.itemCount
-                    val lastVisibleItem = linearLayoutManager.findLastVisibleItemPosition()
-
-                    if (!isLoading && dy != 0 && totalItemCount <= (lastVisibleItem + COUNT_TO_LOAD)) {
-                        recyclerView.post {
-                            loadUsers()
-                        }
-                    }
-                }
-            })
+            recyclerView.addPaginationScrollListener(linearLayoutManager, COUNT_TO_LOAD) {
+                loadUsers()
+            }
         }
     }
 
